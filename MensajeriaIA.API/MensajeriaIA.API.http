@@ -1,0 +1,6 @@
+@MensajeriaIA.API_HostAddress = http://localhost:5197
+
+GET {{MensajeriaIA.API_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
