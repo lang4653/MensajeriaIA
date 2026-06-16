@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 
-namespace MensajeriaIA.API.Hubs;
+namespace ChatService.Hubs;
 
 [Authorize]
 public class ChatHub : Hub

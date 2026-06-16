@@ -1,5 +1,7 @@
 <Solution>
-  <Project Path="MensajeriaIA.API/MensajeriaIA.API.csproj" />
+  <Project Path="AuthService/AuthService.csproj" />
+  <Project Path="BillingService/BillingService.csproj" />
+  <Project Path="ChatService/ChatService.csproj" />
   <Project Path="MensajeriaIA.Core/MensajeriaIA.Core.csproj" />
   <Project Path="MensajeriaIA.Infrastructure/MensajeriaIA.Infrastructure.csproj" />
 </Solution>

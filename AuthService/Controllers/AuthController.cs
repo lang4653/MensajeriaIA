@@ -6,7 +6,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 
-namespace MensajeriaIA.API.Controllers;
+namespace AuthService.Controllers;
 
 [ApiController]
 [Route("auth")]

@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using StackExchange.Redis;
 using System.Security.Claims;
 
-namespace MensajeriaIA.API.Controllers;
+namespace AuthService.Controllers;
 
 [ApiController]
 [Route("usuarios")]
