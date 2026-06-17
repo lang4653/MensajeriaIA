@@ -17,7 +17,7 @@ var redisConn = builder.Configuration.GetConnectionString("Redis") ?? "localhost
 builder.Services.AddSingleton<IConnectionMultiplexer>(ConnectionMultiplexer.Connect(redisConn));
 
 builder.Services.AddSingleton<CassandraSessionFactory>();
-builder.Services.AddScoped<ChatRepository>(); // Solo inyecta el de Chat
+builder.Services.AddScoped<ChatRepository>();
 builder.Services.AddSingleton<SimuladorIAService>();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -26,6 +26,21 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateIssuer = true, ValidateAudience = true, ValidateLifetime = true, ValidateIssuerSigningKey = true,
             ValidIssuer = builder.Configuration["Jwt:Issuer"], ValidAudience = builder.Configuration["Jwt:Audience"],
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]!))
+        };
+        
+        // ¡LA CURA PARA SIGNALR! Le decimos que busque el token en la URL
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                var path = context.HttpContext.Request.Path;
+                if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/chat"))
+                {
+                    context.Token = accessToken;
+                }
+                return Task.CompletedTask;
+            }
         };
     });
 builder.Services.AddAuthorization();
@@ -37,5 +52,5 @@ app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
-app.MapHub<ChatService.Hubs.ChatHub>("/chat"); // Importante: Verifica que tu ChatHub esté en el namespace ChatService.Hubs
+app.MapHub<ChatService.Hubs.ChatHub>("/chat");
 app.Run();

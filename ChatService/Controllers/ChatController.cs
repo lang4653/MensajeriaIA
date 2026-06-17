@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.SignalR;
 using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text;
+using System.Text.Json;
 
 namespace ChatService.Controllers;
 
@@ -24,6 +25,21 @@ public class ChatController : ControllerBase
     public ChatController(ChatRepository repo, SimuladorIAService iaService, IHubContext<ChatHub> hubContext, IHttpClientFactory httpClientFactory)
     {
         _repo = repo; _iaService = iaService; _hubContext = hubContext; _httpClientFactory = httpClientFactory;
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> ObtenerConversaciones()
+    {
+        var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        var chats = await _repo.ObtenerConversacionesRecientesAsync(userId);
+        return Ok(chats);
+    }
+
+    [HttpGet("{id}/mensajes")]
+    public async Task<IActionResult> ObtenerHistorial(Guid id)
+    {
+        var mensajes = await _repo.ObtenerMensajesAsync(id);
+        return Ok(mensajes);
     }
 
     [HttpPost]
@@ -44,36 +60,43 @@ public class ChatController : ControllerBase
             RolActor = "user", Contenido = request.Contenido, TokensConsumidos = 0
         });
 
-        // REGLA DE MICROSERVICIOS: Comunicación HTTP hacia el BillingService
         var authHeader = Request.Headers["Authorization"].ToString();
         var client = _httpClientFactory.CreateClient();
-        client.DefaultRequestHeaders.Add("Authorization", authHeader); // Le pasamos el token del usuario
+        client.DefaultRequestHeaders.Add("Authorization", authHeader);
 
         var costoLlamada = 5;
-        // El puerto 5002 es el que le asignamos a BillingService
         var response = await client.PostAsJsonAsync("http://localhost:5002/pagos/consumir", new { CostoCreditos = costoLlamada });
         
         if (!response.IsSuccessStatusCode)
             return BadRequest(new { Mensaje = "Saldo insuficiente. Por favor, recarga créditos." });
 
-        await _repo.ActualizarTimestampChatRedisAsync(userId, id);
-        _ = ProcesarRespuestaIAAsync(id, request.Contenido);
+        var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+        int nuevoSaldo = result.GetProperty("saldoRestante").GetInt32();
 
-        return Accepted(new { Mensaje = "Procesando respuesta en SignalR..." });
+        await _repo.ActualizarTimestampChatRedisAsync(userId, id);
+        _ = ProcesarRespuestaIAAsync(id, request.Contenido, request.ModeloId);
+
+        return Accepted(new { Mensaje = "Procesando respuesta...", SaldoRestante = nuevoSaldo });
     }
 
-    private async Task ProcesarRespuestaIAAsync(Guid idConversacion, string prompt)
+    private async Task ProcesarRespuestaIAAsync(Guid idConversacion, string prompt, string modeloId)
     {
         var sb = new StringBuilder();
         int tokensIA = 0;
-        await foreach (var fragmento in _iaService.GenerarRespuestaStreamAsync(prompt))
+        await foreach (var fragmento in _iaService.GenerarRespuestaStreamAsync(prompt, modeloId))
         {
             sb.Append(fragmento); tokensIA++;
             await _hubContext.Clients.Group(idConversacion.ToString()).SendAsync("RecibirFragmento", fragmento);
         }
+        
+        string textoFinal = sb.ToString();
+        
+        // ¡LA SOLUCIÓN! Le avisamos explícitamente al frontend que terminamos de enviar datos
+        await _hubContext.Clients.Group(idConversacion.ToString()).SendAsync("FinStream", textoFinal);
+
         await _repo.GuardarMensajeAsync(new Mensaje {
             IdConversacion = idConversacion, FechaHora = DateTime.UtcNow, IdMensaje = Guid.NewGuid(),
-            RolActor = "assistant", Contenido = sb.ToString(), TokensConsumidos = tokensIA
+            RolActor = "assistant", Contenido = textoFinal, TokensConsumidos = tokensIA
         });
     }
 }

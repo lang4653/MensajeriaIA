@@ -38,4 +38,60 @@ public class ChatRepository
         double score = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         await _redisDb.SortedSetAddAsync($"usuario:{idUsuario}:chats", idConversacion.ToString(), score);
     }
+
+    public async Task<List<ConversacionDetalle>> ObtenerConversacionesRecientesAsync(Guid idUsuario)
+    {
+        var chatsRedis = await _redisDb.SortedSetRangeByRankAsync($"usuario:{idUsuario}:chats", 0, -1, Order.Descending);
+        if (chatsRedis.Length == 0)
+            return new List<ConversacionDetalle>();
+
+        var conversaciones = new List<ConversacionDetalle>();
+        foreach (var idStr in chatsRedis)
+        {
+            if (string.IsNullOrWhiteSpace(idStr))
+                continue;
+
+            var id = Guid.Parse(idStr.ToString()!);
+            var row = (await _session.ExecuteAsync(new SimpleStatement(
+                "SELECT * FROM conversaciones_detalle WHERE id_usuario = ? AND id_conversacion = ?",
+                idUsuario,
+                id
+            ))).FirstOrDefault();
+
+            if (row != null && row.GetValue<bool>("estado_activo"))
+            {
+                conversaciones.Add(new ConversacionDetalle
+                {
+                    IdUsuario = idUsuario,
+                    IdConversacion = id,
+                    TituloChat = row.GetValue<string>("titulo_chat"),
+                    EstadoActivo = true
+                });
+            }
+        }
+
+        return conversaciones;
+    }
+
+    public async Task<List<Mensaje>> ObtenerMensajesAsync(Guid idConversacion)
+    {
+        var rowSet = await _session.ExecuteAsync(new SimpleStatement(
+            "SELECT * FROM mensajes_por_conversacion WHERE id_conversacion = ?",
+            idConversacion
+        ));
+
+        var mensajes = rowSet.Select(row => new Mensaje
+        {
+            IdConversacion = idConversacion,
+            FechaHora = row.GetValue<DateTime>("fecha_hora"),
+            IdMensaje = row.GetValue<Guid>("id_mensaje"),
+            RolActor = row.GetValue<string>("rol_actor"),
+            Contenido = row.GetValue<string>("contenido"),
+            TokensConsumidos = row.GetValue<int>("tokens_consumidos"),
+            UrlArchivoMultimedia = row.GetValue<string?>("url_archivo_multimedia")
+        }).ToList();
+
+        mensajes.Reverse();
+        return mensajes;
+    }
 }

@@ -8,6 +8,11 @@ namespace BillingService.Controllers;
 
 public record ConsumoRequest(int CostoCreditos);
 
+public class MiPeticionPago {
+    public decimal MontoDinero { get; set; }
+    public string Moneda { get; set; } = "USD";
+}
+
 [ApiController]
 [Route("pagos")]
 [Authorize]
@@ -17,10 +22,14 @@ public class PagosController : ControllerBase
     public PagosController(CreditosRepository repo) { _repo = repo; }
 
     [HttpPost("cargar-saldo")]
-    public async Task<IActionResult> CargarSaldo([FromBody] CargaSaldoRequest request)
+    public async Task<IActionResult> CargarSaldo([FromBody] MiPeticionPago peticion)
     {
         var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
-        var nuevoSaldo = await _repo.CargarSaldoAsync(userId, request);
+        
+        // ¡LA SOLUCIÓN AQUÍ! Instanciamos usando el constructor con sus 3 parámetros obligatorios
+        var requestCore = new CargaSaldoRequest("0000000000000000", peticion.MontoDinero, peticion.Moneda);
+        
+        var nuevoSaldo = await _repo.CargarSaldoAsync(userId, requestCore);
         return Ok(new { Mensaje = "Saldo recargado exitosamente", NuevoSaldo = nuevoSaldo });
     }
 
@@ -33,7 +42,6 @@ public class PagosController : ControllerBase
         return Ok(new { Items = resultado.Transacciones, NextPagingState = resultado.NextPagingState != null ? Convert.ToBase64String(resultado.NextPagingState) : null });
     }
 
-    // NUEVO ENDPOINT PARA USO INTERNO DE LOS MICROSERVICIOS
     [HttpPost("consumir")]
     public async Task<IActionResult> ConsumirCreditos([FromBody] ConsumoRequest request)
     {

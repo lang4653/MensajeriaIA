@@ -20,4 +20,10 @@ public class Mensaje
 }
 
 public record NuevaConversacionRequest(string Titulo);
-public record NuevoMensajeRequest(string Contenido);
+
+// Aquí reemplazamos el antiguo 'record' por la clase completa que recibe la IA
+public class NuevoMensajeRequest
+{
+    public string Contenido { get; set; } = string.Empty;
+    public string ModeloId { get; set; } = "gemini";
+}
