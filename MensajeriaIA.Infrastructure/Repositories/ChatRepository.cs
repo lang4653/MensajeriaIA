@@ -94,4 +94,21 @@ public class ChatRepository
         mensajes.Reverse();
         return mensajes;
     }
+
+    public async Task EliminarConversacionAsync(Guid idUsuario, Guid idConversacion)
+    {
+        // 1. Borramos de Cassandra (ahora sí, en la tabla correcta)
+        var statement = new SimpleStatement("DELETE FROM conversaciones_detalle WHERE id_usuario = ? AND id_conversacion = ?", idUsuario, idConversacion);
+        await _session.ExecuteAsync(statement);
+
+        // 2. Lo quitamos de la lista de recientes en Redis para que desaparezca al instante
+        await _redisDb.SortedSetRemoveAsync($"usuario:{idUsuario}:chats", idConversacion.ToString());
+    }
+
+    public async Task RenombrarConversacionAsync(Guid idUsuario, Guid idConversacion, string nuevoTitulo)
+    {
+        // Actualizamos en la tabla correcta
+        var statement = new SimpleStatement("UPDATE conversaciones_detalle SET titulo_chat = ? WHERE id_usuario = ? AND id_conversacion = ?", nuevoTitulo, idUsuario, idConversacion);
+        await _session.ExecuteAsync(statement);
+    }
 }

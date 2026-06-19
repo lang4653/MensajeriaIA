@@ -31,72 +31,106 @@ public class ChatController : ControllerBase
     public async Task<IActionResult> ObtenerConversaciones()
     {
         var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
-        var chats = await _repo.ObtenerConversacionesRecientesAsync(userId);
-        return Ok(chats);
+        return Ok(await _repo.ObtenerConversacionesRecientesAsync(userId));
     }
 
     [HttpGet("{id}/mensajes")]
     public async Task<IActionResult> ObtenerHistorial(Guid id)
     {
-        var mensajes = await _repo.ObtenerMensajesAsync(id);
-        return Ok(mensajes);
+        return Ok(await _repo.ObtenerMensajesAsync(id));
     }
 
     [HttpPost]
     public async Task<IActionResult> CrearConversacion([FromBody] NuevaConversacionRequest request)
     {
         var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
-        var idConversacion = await _repo.CrearConversacionAsync(userId, request.Titulo);
-        return Ok(new { IdConversacion = idConversacion });
+        return Ok(new { IdConversacion = await _repo.CrearConversacionAsync(userId, request.Titulo) });
+    }
+
+    [HttpDelete("{id}")]
+    public async Task<IActionResult> EliminarConversacion(Guid id)
+    {
+        try
+        {
+            var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+            await _repo.EliminarConversacionAsync(userId, id);
+            return NoContent();
+        }
+        catch (Exception ex)
+        {
+            // Si Cassandra falla, ahora lo veremos en rojo en tu navegador
+            return StatusCode(500, new { Mensaje = ex.Message });
+        }
+    }
+
+    // --- NUEVO ENDPOINT: Renombrar Chat ---
+    [HttpPut("{id}")]
+    public async Task<IActionResult> RenombrarConversacion(Guid id, [FromBody] RenombrarRequest request)
+    {
+        try
+        {
+            var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+            await _repo.RenombrarConversacionAsync(userId, id, request.Titulo);
+            return Ok();
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { Mensaje = ex.Message });
+        }
     }
 
     [HttpPost("{id}/mensajes")]
     public async Task<IActionResult> EnviarMensaje(Guid id, [FromBody] NuevoMensajeRequest request)
     {
         var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
-        
+        string authHeader = Request.Headers["Authorization"].ToString();
+
         await _repo.GuardarMensajeAsync(new Mensaje {
             IdConversacion = id, FechaHora = DateTime.UtcNow, IdMensaje = Guid.NewGuid(),
             RolActor = "user", Contenido = request.Contenido, TokensConsumidos = 0
         });
 
-        var authHeader = Request.Headers["Authorization"].ToString();
-        var client = _httpClientFactory.CreateClient();
-        client.DefaultRequestHeaders.Add("Authorization", authHeader);
-
-        var costoLlamada = 5;
-        var response = await client.PostAsJsonAsync("http://localhost:5002/pagos/consumir", new { CostoCreditos = costoLlamada });
-        
-        if (!response.IsSuccessStatusCode)
-            return BadRequest(new { Mensaje = "Saldo insuficiente. Por favor, recarga créditos." });
-
-        var result = await response.Content.ReadFromJsonAsync<JsonElement>();
-        int nuevoSaldo = result.GetProperty("saldoRestante").GetInt32();
-
         await _repo.ActualizarTimestampChatRedisAsync(userId, id);
-        _ = ProcesarRespuestaIAAsync(id, request.Contenido, request.ModeloId);
+        _ = ProcesarRespuestaIAAsync(id, request.Contenido, request.ModeloId, authHeader);
 
-        return Accepted(new { Mensaje = "Procesando respuesta...", SaldoRestante = nuevoSaldo });
+        return Accepted(new { Mensaje = "Generando respuesta..." });
     }
 
-    private async Task ProcesarRespuestaIAAsync(Guid idConversacion, string prompt, string modeloId)
+    private async Task ProcesarRespuestaIAAsync(Guid idConversacion, string prompt, string modeloId, string jwtToken)
     {
         var sb = new StringBuilder();
-        int tokensIA = 0;
+        
         await foreach (var fragmento in _iaService.GenerarRespuestaStreamAsync(prompt, modeloId))
         {
-            sb.Append(fragmento); tokensIA++;
+            sb.Append(fragmento);
             await _hubContext.Clients.Group(idConversacion.ToString()).SendAsync("RecibirFragmento", fragmento);
         }
         
         string textoFinal = sb.ToString();
-        
-        // ¡LA SOLUCIÓN! Le avisamos explícitamente al frontend que terminamos de enviar datos
         await _hubContext.Clients.Group(idConversacion.ToString()).SendAsync("FinStream", textoFinal);
 
+        int tokensEstimados = Math.Max(1, textoFinal.Length / 4);
+        int costoCreditos = (int)Math.Ceiling(tokensEstimados * 0.05);
+        if (costoCreditos < 1) costoCreditos = 1;
+
         await _repo.GuardarMensajeAsync(new Mensaje {
-            IdConversacion = idConversacion, FechaHora = DateTime.UtcNow, IdMensaje = Guid.NewGuid(),
-            RolActor = "assistant", Contenido = textoFinal, TokensConsumidos = tokensIA
+            IdConversacion = idConversacion,
+            FechaHora = DateTime.UtcNow,
+            IdMensaje = Guid.NewGuid(),
+            RolActor = "assistant",
+            Contenido = textoFinal,
+            TokensConsumidos = tokensEstimados
         });
+
+        var client = _httpClientFactory.CreateClient();
+        client.DefaultRequestHeaders.Add("Authorization", jwtToken);
+
+        var response = await client.PostAsJsonAsync("http://localhost:5002/pagos/consumir", new { CostoCreditos = costoCreditos, ModeloId = modeloId });
+        
+        if (response.IsSuccessStatusCode)
+        {
+            var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+            await _hubContext.Clients.Group(idConversacion.ToString()).SendAsync("ActualizarSaldo", result.GetProperty("saldoRestante").GetInt32());
+        }
     }
 }

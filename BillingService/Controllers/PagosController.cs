@@ -6,7 +6,8 @@ using System.Security.Claims;
 
 namespace BillingService.Controllers;
 
-public record ConsumoRequest(int CostoCreditos);
+// 1. Actualizamos el record para que acepte el nombre de la IA
+public record ConsumoRequest(int CostoCreditos, string ModeloId = "");
 
 public class MiPeticionPago {
     public decimal MontoDinero { get; set; }
@@ -26,7 +27,6 @@ public class PagosController : ControllerBase
     {
         var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
         
-        // ¡LA SOLUCIÓN AQUÍ! Instanciamos usando el constructor con sus 3 parámetros obligatorios
         var requestCore = new CargaSaldoRequest("0000000000000000", peticion.MontoDinero, peticion.Moneda);
         
         var nuevoSaldo = await _repo.CargarSaldoAsync(userId, requestCore);
@@ -46,7 +46,9 @@ public class PagosController : ControllerBase
     public async Task<IActionResult> ConsumirCreditos([FromBody] ConsumoRequest request)
     {
         var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
-        var saldoRestante = await _repo.DescontarCreditosAsync(userId, request.CostoCreditos);
+        
+        // 2. Le pasamos el ModeloId directamente a la base de datos
+        var saldoRestante = await _repo.DescontarCreditosAsync(userId, request.CostoCreditos, request.ModeloId ?? "");
         
         if (saldoRestante == -1) return BadRequest(new { Mensaje = "Saldo insuficiente" });
         return Ok(new { SaldoRestante = saldoRestante });

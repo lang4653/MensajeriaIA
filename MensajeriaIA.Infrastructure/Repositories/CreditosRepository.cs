@@ -58,10 +58,25 @@ public class CreditosRepository
         return (transacciones, rowSet.PagingState);
     }
 
-    // NUEVO MÉTODO AÑADIDO PARA LOS MICROSERVICIOS
-    public async Task<int> DescontarCreditosAsync(Guid idUsuario, int costeCreditos)
+    // AÑADIMOS EL PARÁMETRO modeloId PARA SABER QUÉ IA COBRÓ
+    public async Task<int> DescontarCreditosAsync(Guid idUsuario, int costeCreditos, string modeloId = "")
     {
         var result = await _redisDb.ScriptEvaluateAsync(LUA_DEDUCIR_SALDO, new RedisKey[] { $"usuario:{idUsuario}:saldo" }, new RedisValue[] { costeCreditos });
-        return (int)result;
+        int saldoRestante = (int)result;
+
+        if (saldoRestante >= 0)
+        {
+            var idTransaccion = Guid.NewGuid();
+            var fechaHora = DateTime.UtcNow;
+            
+            // Aquí es donde ocurre la magia: "CONSUMO GPT-4O" o "CONSUMO CLAUDE-3-5"
+            string tipoTx = string.IsNullOrWhiteSpace(modeloId) ? "CONSUMO CHAT" : $"CONSUMO {modeloId.ToUpper()}";
+            
+            var statement = new SimpleStatement("INSERT INTO transacciones_credito_por_usuario (id_usuario, fecha_hora, id_transaccion, monto_creditos, tipo_transaccion, referencia_id) VALUES (?, ?, ?, ?, ?, ?)", 
+                idUsuario, fechaHora, idTransaccion, costeCreditos, tipoTx, Guid.Empty);
+            await _session.ExecuteAsync(statement);
+        }
+
+        return saldoRestante;
     }
 }

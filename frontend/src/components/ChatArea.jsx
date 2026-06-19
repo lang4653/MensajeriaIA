@@ -5,10 +5,11 @@ import { chatApi } from '../services/api';
 const Icons = {
     Send: () => <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>,
     Clip: () => <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>,
-    Alert: () => <svg className="w-5 h-5 text-red-600 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+    Alert: () => <svg className="w-5 h-5 text-red-600 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>,
+    Edit: () => <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16.862 3.487a1.5 1.5 0 012.121 2.121l-9.192 9.192-2.12.707a.75.75 0 01-.936-.936l.707-2.12 9.192-9.192z" /></svg>
 };
 
-export default function ChatArea({ activeChat, onCreditsUpdated, selectedModel }) {
+export default function ChatArea({ activeChat, onCreditsUpdated, selectedModel, onOpenRenameDialog }) {
     const [messages, setMessages] = useState([]);
     const [inputText, setInputText] = useState('');
     const [isStreaming, setIsStreaming] = useState(false);
@@ -39,6 +40,13 @@ export default function ChatArea({ activeChat, onCreditsUpdated, selectedModel }
             setIsStreaming(false);
             setMessages(prev => [...prev, { idMensaje: Date.now(), rolActor: 'assistant', contenido: textoCompleto }]);
             setStreamingText('');
+        });
+
+        // Espera a que el backend emita el cobro final y actualiza la cabecera
+        connection.on("ActualizarSaldo", (nuevoSaldo) => {
+            if (onCreditsUpdated) {
+                onCreditsUpdated(nuevoSaldo);
+            }
         });
 
         return () => { connection.stop(); };
@@ -82,10 +90,6 @@ export default function ChatArea({ activeChat, onCreditsUpdated, selectedModel }
                 contenido: currentText,
                 modeloId: modeloId
             });
-
-            if (res.data.saldoRestante !== undefined && onCreditsUpdated) {
-                onCreditsUpdated(res.data.saldoRestante);
-            }
             // ¡Adiós setTimeout de 3 segundos! Todo fluye de forma natural ahora.
 
         } catch (error) {
@@ -100,8 +104,18 @@ export default function ChatArea({ activeChat, onCreditsUpdated, selectedModel }
 
     return (
         <div className="flex-1 flex flex-col h-full bg-white relative">
-            <div className="h-12 border-b border-gray-100 px-4 flex items-center bg-white shrink-0">
-                <span className="text-gray-900 text-sm font-semibold truncate">{activeChat.tituloChat}</span>
+            <div className="h-12 border-b border-gray-100 px-4 flex items-center justify-between bg-white shrink-0">
+                <div className="flex items-center gap-2 truncate">
+                    <span className="text-gray-900 text-sm font-semibold truncate">{activeChat.tituloChat || activeChat.title}</span>
+                    <button
+                        type="button"
+                        onClick={() => onOpenRenameDialog?.(activeChat.id || activeChat.idConversacion, activeChat.tituloChat || activeChat.title)}
+                        className="text-gray-400 hover:text-blue-600 p-1.5 rounded transition-colors bg-white border border-transparent hover:border-gray-200"
+                        title="Renombrar chat"
+                    >
+                        <Icons.Edit />
+                    </button>
+                </div>
             </div>
 
             {lowCreditsAlert && (
@@ -154,7 +168,10 @@ export default function ChatArea({ activeChat, onCreditsUpdated, selectedModel }
 
             <div className="p-4 bg-white border-t border-gray-100 shrink-0">
                 <form onSubmit={handleSendMessage} className="flex gap-2 max-w-4xl mx-auto relative">
-                    <button type="button" className="absolute left-3 top-2.5 p-1.5 text-gray-400 hover:text-gray-600 bg-white">
+                    <button 
+                    type="button" 
+                    onClick={() => alert("El microservicio de almacenamiento de archivos estará disponible en la Fase 2 del proyecto.")}
+                    className="absolute left-3 top-2.5 p-1.5 text-gray-400 hover:text-gray-600 transition-colors bg-white">
                         <Icons.Clip />
                     </button>
                     <input 

@@ -9,13 +9,14 @@ const Icons = {
     Plus: () => <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>,
     Menu: () => <svg className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>,
     ChevronDown: () => <svg className="w-4 h-4 ml-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>,
+    Trash: () => <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>,
 };
 
 // LOS 3 MODELOS QUE SOLICITASTE
 const MODELS = [
-    { id: 'gpt-4o', name: 'ChatGPT 4o', cost: '5 créditos / token', desc: 'Simulado vía Gemini (Key 1)' },
-    { id: 'claude-3-5', name: 'Claude 3.5 Sonnet', cost: '5 créditos / token', desc: 'Simulado vía Gemini (Key 2)' },
-    { id: 'gemini', name: 'Google Gemini', cost: '5 créditos / token', desc: 'Modelo nativo (Key 3)' },
+    { id: 'gpt-4o', name: 'ChatGPT 4o', cost: '15 cr / token', desc: 'OpenAI - Alto razonamiento' },
+    { id: 'claude-3-5', name: 'Claude 3.5 Sonnet', cost: '12 cr / token', desc: 'Anthropic - Precisión' },
+    { id: 'gemini', name: 'Google Gemini', cost: '10 cr / token', desc: 'Google - Rápido y eficiente' },
 ];
 
 export default function Dashboard() {
@@ -36,32 +37,108 @@ export default function Dashboard() {
     const [isLoading, setIsLoading] = useState(true);
     const [conversations, setConversations] = useState([]);
     const [activeChat, setActiveChat] = useState(null);
+    const [renameTempTitle, setRenameTempTitle] = useState('');
+    const [renameChatId, setRenameChatId] = useState(null);
+    const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
 
     useEffect(() => {
-        const fetchInitialData = async () => {
+        const fetchChatsReales = async () => {
             try {
                 const userRes = await authApi.get('/usuarios/me');
                 setUser({ email: userRes.data.email, id: userRes.data.id, saldo: userRes.data.saldo || 0 });
 
                 const chatsRes = await chatApi.get('/conversaciones');
-                setConversations(chatsRes.data);
-                if (chatsRes.data.length > 0) setActiveChat(chatsRes.data[0]);
+                const chatsDeVerdad = chatsRes.data.map(c => ({
+                    id: c.idConversacion,
+                    idConversacion: c.idConversacion,
+                    title: c.tituloChat,
+                    tituloChat: c.tituloChat,
+                    date: new Date().toLocaleDateString('es-ES'),
+                    model: 'Hub AI',
+                    messages: []
+                }));
 
-            } catch (error) { console.error("Error", error); } 
-            finally { setIsLoading(false); }
+                setConversations(chatsDeVerdad);
+                if (chatsDeVerdad.length > 0) setActiveChat(chatsDeVerdad[0]);
+
+            } catch (error) {
+                console.error("Error conectando con la BD:", error);
+            } finally {
+                setIsLoading(false);
+            }
         };
-        fetchInitialData();
+        fetchChatsReales();
     }, []);
 
     const handleNewChat = async () => {
         try {
-            const res = await chatApi.post('/conversaciones', { titulo: "Nueva conversación" });
-            const newChat = { idConversacion: res.data.idConversacion, tituloChat: "Nueva conversación" };
+            const res = await chatApi.post('/conversaciones', { titulo: 'Nueva conversación' });
+            const realGuid = res.data.idConversacion;
+
+            const newChat = {
+                id: realGuid,
+                idConversacion: realGuid,
+                title: 'Nueva conversación',
+                tituloChat: 'Nueva conversación',
+                date: new Date().toLocaleDateString('es-ES'),
+                model: selectedModel.name,
+                messages: []
+            };
+            
             setConversations([newChat, ...conversations]);
             setActiveChat(newChat);
             setActiveTab('CHAT');
             setIsSidebarOpen(false);
-        } catch (error) { console.error("Error creando chat", error); }
+        } catch (error) {
+            console.error("Error al crear el chat en el servidor:", error);
+        }
+    };
+
+    const handleDeleteChat = async (e, chatId) => {
+        e.stopPropagation(); // Evita que se abra el chat al hacer clic en borrar
+        if (!window.confirm('¿Eliminar esta conversación de Hub AI?')) return;
+
+        try {
+            await chatApi.delete(`/conversaciones/${chatId}`);
+            const chatsRestantes = conversations.filter(c => c.id !== chatId && c.idConversacion !== chatId);
+            setConversations(chatsRestantes);
+            if (activeChat?.id === chatId || activeChat?.idConversacion === chatId) {
+                setActiveChat(chatsRestantes.length > 0 ? chatsRestantes[0] : null);
+            }
+        } catch (error) {
+            const errorMsg = error.response?.data?.Mensaje || error.message;
+            alert(`Error del servidor: ${errorMsg}`);
+            console.error("Detalle:", error);
+        }
+    };
+
+    const openRenameDialog = (chatId, currentTitle) => {
+        setRenameChatId(chatId);
+        setRenameTempTitle(currentTitle || '');
+        setIsRenameModalOpen(true);
+    };
+
+    const saveRenameTitle = async () => {
+        if (renameTempTitle.trim()) {
+            try {
+                await chatApi.put(`/conversaciones/${renameChatId}`, { Titulo: renameTempTitle.trim() });
+                
+                setConversations(conversations.map(c => {
+                    if (c.id === renameChatId || c.idConversacion === renameChatId) {
+                        return { ...c, title: renameTempTitle.trim(), tituloChat: renameTempTitle.trim() };
+                    }
+                    return c;
+                }));
+
+                if (activeChat?.id === renameChatId || activeChat?.idConversacion === renameChatId) {
+                    setActiveChat({ ...activeChat, title: renameTempTitle.trim(), tituloChat: renameTempTitle.trim() });
+                }
+            } catch (error) {
+                const errorMsg = error.response?.data?.Mensaje || error.message;
+                alert(`Error al renombrar: ${errorMsg}`);
+            }
+        }
+        setIsRenameModalOpen(false);
     };
 
     const handleLogout = () => {
@@ -74,25 +151,6 @@ export default function Dashboard() {
     return (
         <div className="w-full h-screen flex flex-col justify-between bg-gray-50 text-gray-900 relative">
             
-            {/* LA BARRA SANDBOX DE TU MOCKUP ORIGINAL */}
-            <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 flex flex-wrap gap-4 items-center justify-between z-50 shrink-0 select-none">
-                <div className="flex items-center gap-2">
-                    <span className="inline-block w-2 h-2 rounded-full bg-amber-500"></span>
-                    <span className="font-semibold text-amber-800 text-xs">Entorno de Pruebas Activo</span>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                    <button onClick={() => setIsOffline(!isOffline)} className="px-2 py-1 rounded border border-amber-300 text-amber-700 hover:bg-amber-100 text-[11px] font-medium transition-colors">
-                        {isOffline ? 'Restaurar conexión' : 'Simular offline'}
-                    </button>
-                </div>
-            </div>
-
-            {isOffline && (
-                <div className="bg-red-500 text-white text-xs py-2 px-4 flex items-center justify-center font-medium shadow-md z-40 shrink-0">
-                    Sin conexión a internet. Verifique su red.
-                </div>
-            )}
-
             <div className="flex-1 flex flex-col overflow-hidden relative bg-white">
                 <header className="h-[60px] min-h-[60px] bg-white border-b border-gray-200 px-4 flex items-center justify-between z-30 select-none shrink-0">
                     <div className="flex items-center gap-4">
@@ -121,7 +179,12 @@ export default function Dashboard() {
                                     {MODELS.map(m => (
                                         <div key={m.id} onClick={() => { setSelectedModel(m); setIsModelDropdownOpen(false); }}
                                             className={`p-2 rounded-md cursor-pointer transition-colors mb-1 ${selectedModel.id === m.id ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-50 text-gray-700'}`}>
-                                            <div className="font-semibold mb-0.5">{m.name}</div>
+                                            <div className="font-semibold mb-0.5 flex justify-between items-center">
+                                                <span>{m.name}</span>
+                                                <span className="text-[9px] font-bold text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded">
+                                                    {m.cost}
+                                                </span>
+                                            </div>
                                             <p className="text-[10px] opacity-80 leading-snug">{m.desc}</p>
                                         </div>
                                     ))}
@@ -171,12 +234,28 @@ export default function Dashboard() {
                         </button>
                         <div className="text-xs text-gray-500 font-semibold mb-3 px-1">Recientes</div>
                         <div className="flex-1 overflow-y-auto space-y-1">
-                            {conversations.map(c => (
-                                <div key={c.idConversacion} onClick={() => { setActiveChat(c); setActiveTab('CHAT'); }}
-                                    className={`rounded-lg cursor-pointer p-3 transition-colors ${activeChat?.idConversacion === c.idConversacion ? 'bg-blue-50 text-blue-900 font-medium' : 'hover:bg-gray-100 text-gray-700 text-sm'}`}>
-                                    {c.tituloChat}
-                                </div>
-                            ))}
+                            {conversations.map(c => {
+                                const isActive = activeChat?.idConversacion === c.idConversacion;
+                                return (
+                                    <div
+                                        key={c.idConversacion}
+                                        onClick={() => { setActiveChat(c); setActiveTab('CHAT'); }}
+                                        className={`group flex items-center justify-between rounded-lg p-3 transition-colors text-left cursor-pointer ${isActive ? 'bg-blue-50 text-blue-900 font-medium' : 'hover:bg-gray-100 text-gray-700 text-sm'}`}
+                                    >
+                                        <div className="flex-1 truncate">
+                                            <div className="text-sm font-medium truncate">{c.tituloChat}</div>
+                                        </div>
+                                        <button
+                                            onClick={(e) => handleDeleteChat(e, c.idConversacion)}
+                                            className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-600 transition-opacity p-0.5"
+                                            title="Eliminar chat"
+                                            type="button"
+                                        >
+                                            <Icons.Trash />
+                                        </button>
+                                    </div>
+                                );
+                            })}
                         </div>
                     </aside>
 
@@ -186,6 +265,7 @@ export default function Dashboard() {
                                 activeChat={activeChat} 
                                 onCreditsUpdated={(nuevoSaldo) => setUser({...user, saldo: nuevoSaldo})}
                                 selectedModel={selectedModel} /* <--- LE PASAMOS EL MODELO A CHATAREA */
+                                onOpenRenameDialog={openRenameDialog}
                             />
                         )}
                         {activeTab === 'PROFILE' && (
@@ -193,6 +273,35 @@ export default function Dashboard() {
                         )}
                     </main>
                 </div>
+
+                {isRenameModalOpen && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+                        <div className="w-full max-w-md rounded-3xl bg-white border border-gray-200 shadow-xl p-6">
+                            <div className="flex items-center justify-between mb-4">
+                                <div>
+                                    <h2 className="text-lg font-semibold text-gray-900">Renombrar conversación</h2>
+                                    <p className="text-xs text-gray-500">Actualiza el título que verás en el historial.</p>
+                                </div>
+                                <button onClick={() => setIsRenameModalOpen(false)} className="text-gray-400 hover:text-gray-700">✕</button>
+                            </div>
+                            <input
+                                type="text"
+                                value={renameTempTitle}
+                                onChange={(e) => setRenameTempTitle(e.target.value)}
+                                className="w-full rounded-2xl border border-gray-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100"
+                                placeholder="Nuevo nombre de la conversación"
+                            />
+                            <div className="mt-4 flex justify-end gap-2">
+                                <button onClick={() => setIsRenameModalOpen(false)} className="rounded-2xl border border-gray-200 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                                    Cancelar
+                                </button>
+                                <button onClick={saveRenameTitle} className="rounded-2xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+                                    Guardar
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     );
